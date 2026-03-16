@@ -1,0 +1,41 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-void: #020617; /* The Deep Midnight */
+}
+
+body {
+  background-color: var(--bg-void);
+  color: white;
+  overflow-x: hidden;
+}
+
+@layer utilities {
+  .glass-card {
+    @apply bg-white/5 backdrop-blur-xl border border-white/20 shadow-2xl;
+  }
+  .glass-input {
+    @apply bg-black/20 border border-white/10 focus:border-blue-500/50 focus:ring-2 focus:ring-blue-500/20 placeholder-white/30 text-white;
+  }
+  /* Custom Glass Utility from Audit */
+  .glass-panel {
+    @apply bg-white/5 backdrop-blur-xl border border-white/10 shadow-[0_8px_32px_0_rgba(0,0,0,0.37)];
+  }
+  /* Fluid Typography for Cards */
+  .card-label {
+    font-size: clamp(0.75rem, 1vw + 0.5rem, 1.125rem);
+  }
+  
+  /* Scrollbar Hide Utility */
+  .scrollbar-hide::-webkit-scrollbar {
+      display: none;
+  }
+  .scrollbar-hide {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+  }
+}

@@ -1,0 +1,252 @@
+import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Save, Server, Shield, Smartphone, Plus, Trash2, Edit2, Check, X, AlertCircle } from 'lucide-react';
+import axios from 'axios';
+
+const API = '/api';
+
+const Settings = () => {
+    const [fines, setFines] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [newFine, setNewFine] = useState({ name: '', amount: '', description: '' });
+    const [showAddFine, setShowAddFine] = useState(false);
+    const [editingFine, setEditingFine] = useState(null); // { id, name, amount, description }
+    const [pendingExpenses, setPending] = useState([]);
+    const [expTab, setExpTab] = useState('fines'); // 'fines' | 'approvals'
+
+    const fetchFines = async () => {
+        try { const r = await axios.get(`${API}/settings/fines`); setFines(r.data); }
+        catch (e) { console.error(e); }
+    };
+
+    const fetchPending = async () => {
+        try { const r = await axios.get(`${API}/expenses/pending`); setPending(r.data); }
+        catch (e) { console.error(e); }
+    };
+
+    useEffect(() => {
+        const load = async () => {
+            setLoading(true);
+            await Promise.all([fetchFines(), fetchPending()]);
+            setLoading(false);
+        };
+        load();
+    }, []);
+
+    const addFine = async () => {
+        if (!newFine.name.trim() || !newFine.amount) return;
+        await axios.post(`${API}/settings/fines`, newFine);
+        setNewFine({ name: '', amount: '', description: '' });
+        setShowAddFine(false);
+        fetchFines();
+    };
+
+    const updateFine = async () => {
+        if (!editingFine) return;
+        await axios.put(`${API}/settings/fines/${editingFine.id}`, editingFine);
+        setEditingFine(null);
+        fetchFines();
+    };
+
+    const deleteFine = async (id) => {
+        if (!window.confirm('Delete this fine type?')) return;
+        await axios.delete(`${API}/settings/fines/${id}`);
+        fetchFines();
+    };
+
+    const approveExpense = async (id, action) => {
+        await axios.put(`${API}/expenses/${id}/approve`, { action });
+        fetchPending();
+    };
+
+    return (
+        <div className="max-w-4xl mx-auto space-y-8 p-4 md:p-0">
+            <div>
+                <h1 className="text-3xl font-bold text-white">System Settings</h1>
+                <p className="text-white/40 text-sm">Configure your Hostel ERP Core</p>
+            </div>
+
+            <div className="grid grid-cols-1 gap-8">
+                {/* General Config */}
+                <div className="glass-panel p-8 rounded-xl space-y-6">
+                    <h3 className="text-xl font-bold text-white flex items-center">
+                        <Server className="mr-3 text-blue-400" /> General Configuration
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="space-y-2">
+                            <label className="text-xs font-medium uppercase tracking-wider text-white/40">Hostel Name</label>
+                            <input type="text" defaultValue="Coolsun Hostel" className="glass-input h-12 w-full px-4 rounded-xl" />
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-xs font-medium uppercase tracking-wider text-white/40">Manager PIN</label>
+                            <input type="password" defaultValue="****" className="glass-input h-12 w-full px-4 rounded-xl" />
+                        </div>
+                    </div>
+                </div>
+
+                {/* Fine Library + Approval Pipeline */}
+                <div className="glass-panel p-8 rounded-xl space-y-6">
+                    <h3 className="text-xl font-bold text-white flex items-center">
+                        <Shield className="mr-3 text-red-400" /> Financial Controls
+                    </h3>
+
+                    {/* Sub-tabs */}
+                    <div className="flex gap-2 p-1 rounded-xl bg-white/5 border border-white/10 w-fit">
+                        {[
+                            { key: 'fines', label: 'Fine Library' },
+                            { key: 'approvals', label: `Pending Approvals (${pendingExpenses.length})` },
+                        ].map(t => (
+                            <button key={t.key} onClick={() => setExpTab(t.key)}
+                                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${expTab === t.key
+                                    ? 'bg-blue-600 text-white'
+                                    : 'text-white/50 hover:text-white hover:bg-white/5'
+                                    }`}>{t.label}</button>
+                        ))}
+                    </div>
+
+                    {/* Fine Library */}
+                    {expTab === 'fines' && (
+                        <div className="space-y-4">
+                            <div className="flex items-center justify-between">
+                                <p className="text-white/50 text-sm">Define fine types and amounts. Staff selects from this list when applying a fine.</p>
+                                <button onClick={() => setShowAddFine(!showAddFine)}
+                                    className="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600/80 hover:bg-blue-600 text-white text-sm transition-all">
+                                    <Plus className="w-4 h-4" /> Add Fine
+                                </button>
+                            </div>
+
+                            <AnimatePresence>
+                                {showAddFine && (
+                                    <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+                                        className="p-4 rounded-xl bg-white/5 border border-white/10 space-y-3">
+                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                            <input value={newFine.name} onChange={e => setNewFine({ ...newFine, name: e.target.value })}
+                                                placeholder="Fine name (e.g. Late Rent Fee)" type="text"
+                                                className="px-3 py-2.5 rounded-xl bg-black/20 border border-white/10 text-white placeholder-white/30 focus:outline-none focus:border-blue-500/50 text-sm" />
+                                            <input value={newFine.amount} onChange={e => setNewFine({ ...newFine, amount: e.target.value })}
+                                                placeholder="Amount (Rs.)" type="number"
+                                                className="px-3 py-2.5 rounded-xl bg-black/20 border border-white/10 text-white placeholder-white/30 focus:outline-none focus:border-blue-500/50 text-sm" />
+                                            <input value={newFine.description} onChange={e => setNewFine({ ...newFine, description: e.target.value })}
+                                                placeholder="Description (optional)" type="text"
+                                                className="px-3 py-2.5 rounded-xl bg-black/20 border border-white/10 text-white placeholder-white/30 focus:outline-none focus:border-blue-500/50 text-sm" />
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <button onClick={addFine} className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium">Add</button>
+                                            <button onClick={() => setShowAddFine(false)} className="px-4 py-2 rounded-xl bg-white/5 text-white/50 text-sm hover:bg-white/10">Cancel</button>
+                                        </div>
+                                    </motion.div>
+                                )}
+                            </AnimatePresence>
+
+                            {loading ? (
+                                <div className="text-center py-6 text-white/30 text-sm">Loading fine types...</div>
+                            ) : (
+                                <div className="space-y-2">
+                                    {fines.map(f => (
+                                        <div key={f.id} className="flex items-center gap-4 p-4 rounded-xl bg-white/5 border border-white/10">
+                                            {editingFine?.id === f.id ? (
+                                                <>
+                                                    <input value={editingFine.name} onChange={e => setEditingFine({ ...editingFine, name: e.target.value })}
+                                                        className="flex-1 px-3 py-1.5 rounded-lg bg-black/30 border border-white/10 text-white text-sm focus:outline-none" />
+                                                    <input value={editingFine.amount} onChange={e => setEditingFine({ ...editingFine, amount: e.target.value })}
+                                                        type="number"
+                                                        className="w-28 px-3 py-1.5 rounded-lg bg-black/30 border border-white/10 text-white text-sm focus:outline-none" />
+                                                    <button onClick={updateFine} className="text-green-400 hover:text-green-300"><Check className="w-4 h-4" /></button>
+                                                    <button onClick={() => setEditingFine(null)} className="text-red-400 hover:text-red-300"><X className="w-4 h-4" /></button>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <div className="flex-1">
+                                                        <p className="text-white text-sm font-medium">{f.name}</p>
+                                                        {f.description && <p className="text-white/40 text-xs">{f.description}</p>}
+                                                    </div>
+                                                    <span className="text-yellow-400 font-bold text-sm">Rs. {f.amount.toLocaleString()}</span>
+                                                    <button onClick={() => setEditingFine({ ...f })} className="text-white/40 hover:text-white transition-colors">
+                                                        <Edit2 className="w-4 h-4" />
+                                                    </button>
+                                                    <button onClick={() => deleteFine(f.id)} className="text-red-400/60 hover:text-red-400 transition-colors">
+                                                        <Trash2 className="w-4 h-4" />
+                                                    </button>
+                                                </>
+                                            )}
+                                        </div>
+                                    ))}
+                                    {fines.length === 0 && (
+                                        <p className="text-center text-white/30 py-4 text-sm">No fine types defined.</p>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* Expense Approval Queue */}
+                    {expTab === 'approvals' && (
+                        <div className="space-y-3">
+                            {pendingExpenses.length === 0 ? (
+                                <div className="text-center py-8 text-white/30">
+                                    <Check className="w-10 h-10 mx-auto mb-2 text-green-400/50" />
+                                    <p className="text-sm">All expenses approved. Nothing pending.</p>
+                                </div>
+                            ) : (
+                                pendingExpenses.map(e => (
+                                    <div key={e.id} className="p-4 rounded-xl bg-yellow-500/5 border border-yellow-500/20">
+                                        <div className="flex items-start justify-between flex-wrap gap-3">
+                                            <div>
+                                                <div className="flex items-center gap-2">
+                                                    <AlertCircle className="w-4 h-4 text-yellow-400" />
+                                                    <span className="text-white font-medium text-sm">{e.category}</span>
+                                                    <span className="text-yellow-400 font-bold">Rs. {parseFloat(e.amount).toLocaleString()}</span>
+                                                </div>
+                                                <p className="text-white/60 text-xs mt-1">{e.description}</p>
+                                                {e.sub_note && <p className="text-white/40 text-xs italic">Note: {e.sub_note}</p>}
+                                                <p className="text-white/30 text-xs mt-1">{e.date?.split('T')[0]}</p>
+                                            </div>
+                                            <div className="flex gap-2">
+                                                <button onClick={() => approveExpense(e.id, 'Approved')}
+                                                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-green-500/20 border border-green-500/30 text-green-400 text-xs font-medium hover:bg-green-500/30 transition-all">
+                                                    <Check className="w-3.5 h-3.5" /> Approve
+                                                </button>
+                                                <button onClick={() => approveExpense(e.id, 'Rejected')}
+                                                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-medium hover:bg-red-500/20 transition-all">
+                                                    <X className="w-3.5 h-3.5" /> Reject
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    )}
+                </div>
+
+                {/* API Integration */}
+                <div className="glass-panel p-8 rounded-xl space-y-6">
+                    <h3 className="text-xl font-bold text-white flex items-center">
+                        <Smartphone className="mr-3 text-purple-400" /> API Integrations
+                    </h3>
+                    <div className="space-y-4">
+                        <div className="space-y-2">
+                            <label className="text-xs font-medium uppercase tracking-wider text-white/40">WhatsApp Business API Key</label>
+                            <input type="text" defaultValue="" placeholder="Enter Meta WhatsApp API key..." className="glass-input h-12 w-full px-4 rounded-xl font-mono text-sm" />
+                        </div>
+                        <div className="flex items-center space-x-2">
+                            <input type="checkbox" defaultChecked className="h-5 w-5 accent-blue-500 rounded" />
+                            <span className="text-sm text-white/70">Auto-send Rent Reminders on 5th of every month</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="flex justify-end">
+                    <motion.button
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
+                        className="px-8 py-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold flex items-center shadow-lg shadow-blue-500/30">
+                        <Save size={20} className="mr-2" /> Save Changes
+                    </motion.button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+export default Settings;

@@ -1,0 +1,52 @@
+# Node.js
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+frontend/.env.local
+npm-debug.log*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+backend/__pycache__/
+.venv/
+venv/
+env/
+ENV/
+
+# Databases (CRITICAL: Do not push local databases to production)
+*.db
+*.sqlite3
+backend/hostel.db
+hostel.db
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDEs and Editors
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Project specific
+uploads/
+backend/uploads/
+.trae/

@@ -1,0 +1,189 @@
+from flask import Blueprint, jsonify, request
+from backend.models import db, Tenant, Room, Ledger
+
+tenants_bp = Blueprint('tenants', __name__)
+
+@tenants_bp.route('/tenants', methods=['GET'])
+def get_tenants():
+    tenants = Tenant.query_active().all()
+    result = []
+    for t in tenants:
+        room = Room.query.get(t.room_id)
+        
+        # Calculate pending balance breakdown using (Total Billed/Due - Total Paid) logic
+        # Initialize trackers
+        rent_billed = 0
+        rent_paid = 0
+        security_due = 0
+        security_paid = 0
+        utility_due = 0
+        utility_paid = 0
+        total_paid = 0
+
+        # Loop through ledger entries
+        for ledger in t.transactions:
+            if ledger.deleted_at is None:
+                amt = float(ledger.amount)
+                if ledger.type in ['RENT', 'PRIVATE_RENT']:
+                    rent_billed += amt if ledger.status == 'PENDING' else 0 
+                    # Best way: A 'PENDING' ledger represents what was billed but is UNPAID.
+                    # Actually, if pay dues creates a 'PAID' ledger and reduces the 'PENDING' one, then sum of PENDING is the exact un-paid amount.
+                    # Let's ensure we just cleanly sum PENDING, and total PAID.
+                if ledger.status == 'PAID':
+                    total_paid += amt
+
+        # Current DB approach: Pending ledgers literally hold the un-paid balance.
+        # But wait! The prompt explicitly said:
+        # "Fix Pending Balance math: (Current Rent + Security Due) - (Rent Paid + Security Paid)."
+        
+        # Let's calculate exactly that.
+        total_rent_due = 0
+        total_rent_paid = 0
+        total_security_due = 0
+        total_security_paid = 0
+        total_utility_due = 0
+        total_utility_paid = 0
+
+        for ledger in t.transactions:
+            if ledger.deleted_at is None:
+                amt = float(ledger.amount)
+                if ledger.type in ['RENT', 'PRIVATE_RENT']:
+                    if ledger.status == 'PAID':
+                        total_rent_paid += amt
+                        total_rent_due += amt # It was due, and they paid it
+                    else:
+                        total_rent_due += amt # It is due, but not paid
+                elif ledger.type == 'DEPOSIT':
+                    if ledger.status == 'PAID':
+                        total_security_paid += amt
+                        total_security_due += amt
+                    else:
+                        total_security_due += amt
+                elif ledger.type == 'UTILITY':
+                    if ledger.status == 'PAID':
+                        total_utility_paid += amt
+                        total_utility_due += amt
+                    else:
+                        total_utility_due += amt
+
+        # The *actual* pending balance is Due - Paid
+        rent_balance = max(0, total_rent_due - total_rent_paid)
+        security_balance = max(0, total_security_due - total_security_paid)
+        utility_balance = max(0, total_utility_due - total_utility_paid)
+        
+        # Total paid includes all PAID types
+        total_paid = sum(float(l.amount) for l in t.transactions if l.status == 'PAID' and l.deleted_at is None)
+
+        total_pending_balance = rent_balance + security_balance + utility_balance
+        status = 'Active'
+        if total_pending_balance > 0:
+            status = 'Late'
+
+        result.append({
+            "id": t.id,
+            "name": t.name,
+            "room": t.room.number if t.room else "Unknown",
+            "room_id": t.room_id,
+            "bed": t.bed_label or "Not Assigned",
+            "bed_label": t.bed_label or "",
+            "status": status,
+            "compliance": t.get_compliance_status(),
+            "balance": total_pending_balance,
+            "rent_balance": rent_balance,
+            "security_balance": security_balance,
+            "utility_balance": utility_balance,
+            "total_paid": total_paid,
+            "phone": t.phone,
+            "internet_opt_in": t.internet_opt_in,
+            "id_card_front_url": t.id_card_front_url,
+            "id_card_back_url": t.id_card_back_url,
+            "police_form_url": t.police_form_url,
+            "parent_tenant_id": t.parent_tenant_id,
+            "payment_method": next((l.payment_method for l in t.transactions if l.status == 'PAID' and l.payment_method), 'Cash')
+        })
+    return jsonify(result), 200
+
+@tenants_bp.route('/tenants/<int:id>', methods=['PUT'])
+def update_tenant(id):
+    tenant = Tenant.query_active().filter_by(id=id).first_or_404()
+    data = request.json
+    
+    tenant.name = data.get('name', tenant.name)
+    tenant.phone = data.get('phone', tenant.phone)
+    # Accept either 'bed_label' (new) or 'bed' (legacy frontend key)
+    bed_val = data.get('bed_label') or data.get('bed')
+    if bed_val is not None:
+        tenant.bed_label = bed_val
+    
+    if 'internet_opt_in' in data:
+        tenant.internet_opt_in = bool(data.get('internet_opt_in'))
+        
+    if 'parent_tenant_id' in data:
+        pt_id = data.get('parent_tenant_id')
+        tenant.parent_tenant_id = None if pt_id == '' or pt_id is None else int(pt_id)
+        
+    db.session.commit()
+    return jsonify({"message": "Successfully updated tenant"}), 200
+
+@tenants_bp.route('/tenants/<int:id>', methods=['DELETE'])
+def delete_tenant(id):
+    tenant = Tenant.query_active().filter_by(id=id).first_or_404()
+    tenant.delete() # Uses SoftDeleteMixin
+    db.session.commit()
+    return jsonify({"message": "Successfully removed tenant"}), 200
+
+import csv
+from io import StringIO
+from datetime import datetime
+
+@tenants_bp.route('/tenants/import', methods=['POST'])
+def import_tenants():
+    if 'file' not in request.files:
+        return jsonify({"error": "No CSV file uploaded"}), 400
+        
+    file = request.files['file']
+    if not file.filename.endswith('.csv'):
+        return jsonify({"error": "Please upload a valid .csv file"}), 400
+        
+    try:
+        # Decode the file stream and read as CSV
+        stream = StringIO(file.stream.read().decode("utf-8-sig"), newline=None)
+        csv_input = csv.DictReader(stream)
+        
+        imported = 0
+        for row in csv_input:
+            # Flexible header matching
+            keys = {k.strip().lower(): k for k in row.keys() if k}
+            
+            name = row.get(keys.get('name')) if keys.get('name') else None
+            room_num = row.get(keys.get('room')) if keys.get('room') else None
+            phone = row.get(keys.get('phone')) if keys.get('phone') else ''
+            bed = row.get(keys.get('bed')) if keys.get('bed') else ''
+            
+            if not name or not room_num:
+                continue
+                
+            # Find the room ID based on the room number string
+            room = Room.query.filter_by(number=str(room_num).strip()).first()
+            if not room:
+                room = Room(number=str(room_num).strip(), floor=1, capacity=3, type='Standard', base_rent=10000)
+                db.session.add(room)
+                db.session.commit() # Commit to get ID for this tenant
+                
+            tenant = Tenant(
+                name=name.strip() if name else 'Unknown',
+                room_id=room.id,
+                phone=phone.strip() if phone else '',
+                bed_label=bed.strip() if bed else '',
+                agreement_start_date=datetime.utcnow().date(),
+                status='Active'
+            )
+            db.session.add(tenant)
+            imported += 1
+            
+        db.session.commit()
+        return jsonify({"message": f"Successfully imported {imported} new tenants!"}), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": f"Failed to parse CSV: {str(e)}"}), 500
